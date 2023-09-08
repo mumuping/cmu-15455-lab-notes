@@ -2,7 +2,7 @@
 
 ## 1. Task #1 - Lock Manager
 
-1. Lock Manager 的基本思想：在正在运行的事务内部会有一个数据结构，用于保存这个事务当前已经获取的锁，然后 LockManager 就是来管理这个事务中的这个数据结构，即授予该事务锁、阻塞该事务（当事务获取锁时）、或 abort 该事务（当事务获取锁时）。举个例子，比如一个事务想要获取某个 table 的某个 tuple，那么它先会向 LockManager 申请锁，只有得到锁后才能够获取到该 tuple。 
+1. Lock Manager 的基本思想：
 
    > The basic idea of a LM is that it maintains an internal data structure about the locks currently held by active transactions. Transactions then issue lock requests to the LM before they are allowed to access a data item. The LM will either grant the lock to the calling transaction, block that transaction, or abort it.
 2. Lock Manager 的任务：根据事务的隔离等级来授权和释放事务的锁。
@@ -46,9 +46,9 @@
     >
     >    SIX -> [X]
     >
-    > You will need some way to notify transactions that are waiting when they may be up to grab the lock. We recommend using std::condition_variable provided as part of LockRequestQueue. 
+    > You will need some way to notify transactions that are waiting when they may be up to grab the lock. We recommend using std::condition_variable provided as part of LockRequestQueue.
     >
-    > 使用条件变量阻塞还未得到授权的请求；当某个请求得到授权后，要通知后面还在等待被处理的请求。
+    > 使用条件变量去通知后面还在等待被处理的请求。
     >
     > You should maintain the state of a transaction. For example, the states of transaction may be changed from GROWING phase to SHRINKING phase due to unlock operation (Hint: Look at the methods in transaction.h)
     >
@@ -150,7 +150,7 @@
     *   该请求重新放入队列中，其位置应该是所有未被授权的请求的最前面，也就是说下一个待处理的请求就是该升级后的请求。然后将
     *   请求队列中的 upgrading_ 字段设置为该事务，表示正在升级该事务请求。然后由于该新请求是下一个待处理的请求，那么我们
     *   现在就需要尝试对它授权，若授权成功，则重置 upgrading_ 字段，表示升级完成，否则我们就需要等待，直到授权成功，或者事务
-    *   自己 abort（注意 abort 的时候需要冲请求队列中删除这个新的请求）（如何授权？看下面第 6 点总结）。
+    *   自己 abort（注意 abort 的时候需要从请求队列中删除这个新的请求）（如何授权？看下面第 6 点总结）。
     *
     *   上面我们还需要考虑一件事：该事务的前一次请求是否已经被授权了？如果未被授权，那么按上面方式处理即可；如果已经被授权了，
     *   那么我们就需要从该事务所保存的已经获取的锁集合中，删除上一次获取的锁，把锁回收，然后再按上面方式重新申请。
@@ -163,7 +163,7 @@
     */
     ```
 
-6. 综上所述，表加锁的工作流程大致应该是这样的：LockManager 会有以下数据结构用于保存请求哪个表/行的锁请求队列。当一个锁请求到达 LockManager 时，会检查它访问的表/行是否存在请求队列。如果不存在，说明当前没有事务请求该表/行，这时需要创建一个对应的请求队列，并将该请求加入到请求队列中，然后授予该请求锁。当请求队列存在时，说明当前有请求该表/行的事务队列，这时需要检查请求队列中该事务前面是否已经申请到了锁，考虑是否能够进行锁升级。若请求队列中不存在该事务，则将该请求加入到请求队列的队尾，然后判断如果这个请求之前所有的请求都被授予了，并且这个请求所需的锁与前面请求的锁是相容的，那么这个请求也会被授予，否则这个事务只能等待（这就是如何授权，也就是说在授权是按照 FIFO 进行的，当授权某个事务时，一定要保证它请求的锁类型要兼容前面**所有**事务请求的锁类型）。（在整个过程中，一定要记得处理事务本身内部所保存的一些锁集，比如授权时应该在事务内部锁集添加这个锁、锁升级时若原前一个请求已经被授予，则要从锁集中删除这个锁，等等）
+6. 综上所述，表加锁的工作流程大致应该是这样的：LockManager 会有多个锁请求队列用于保存哪些事务在请求哪个表/行。当一个锁请求到达 LockManager 时，会检查它访问的表/行是否存在请求队列。如果不存在，说明当前没有事务请求该表/行，这时需要创建一个对应的请求队列，并将该请求加入到请求队列中，然后授予该请求锁。当请求队列存在时，说明当前有请求该表/行的事务队列，这时需要检查请求队列中该事务前面是否已经申请到了锁，考虑是否能够进行锁升级。若请求队列中不存在该事务，则将该请求加入到请求队列的队尾，然后判断如果这个请求之前所有的请求都被授予了，并且这个请求所需的锁与前面请求的锁是相容的，那么这个请求也会被授予，否则这个事务只能等待（这就是如何授权，也就是说在授权是按照 FIFO 进行的，当授权某个事务时，一定要保证它请求的锁类型要兼容前面**所有**事务请求的锁类型）。（在整个过程中，一定要记得处理事务本身内部所保存的一些锁集，比如授权时应该在事务内部锁集添加这个锁、锁升级时若原前一个请求已经被授予，则要从锁集中删除这个锁，等等）
 
     ```cpp
     /** Structure that holds lock requests for a given table oid */
@@ -172,11 +172,11 @@
     std::unordered_map<RID, std::shared_ptr<LockRequestQueue>> row_lock_map_;
     ```
 
-7. 注意：让事务的请求等待，可以利用请求队列提供的条件变量解决，也就是说，当我们检查到不能给该事务请求授权时，我们可以调用`request_queue->cv_.wait(lk);`挂起该任务，等待被唤醒。如果被唤醒，首先应该检查的是该事务是否 abort，因为事务被 abort 和 commit 时也会唤醒该条件变量（存疑），然后再检查一遍是否可以 grant。此外，由于条件变量可能会被伪唤醒，因此要将该逻辑写在一个循环中。注意不能合并写成`request_queue->cv_.wait(lk, [&](){return IsGrantLock(request_queue, upgrade_request);})`，因为事务 abort 时 IsGrantLock 可能不会返回 true，导致一直等待。最后，在处理完请求队列的一个请求后，也应该调用该条件变量去唤醒被阻塞的、锁兼容的请求。当然如果是 X 类型的锁，就不用唤醒其他的请求了，因为没有跟它兼容的锁。
+7. 注意：让事务的请求等待，可以利用请求队列提供的条件变量解决，也就是说，当我们检查到不能给该事务请求授权时，我们可以调用`request_queue->cv_.wait(lk);`挂起该任务，等待被唤醒。如果被唤醒，首先应该检查的是该事务是否 abort，因为事务被 abort 和 commit 时也会唤醒该条件变量，然后再检查一遍是否可以 grant。此外，由于条件变量可能会被伪唤醒，因此要将该逻辑写在一个循环中。注意不能合并写成`request_queue->cv_.wait(lk, [&](){return IsGrantLock(request_queue, upgrade_request);})`，因为事务 abort 时 IsGrantLock 可能不会返回 true，导致一直等待。最后，在处理完请求队列的一个请求后，也应该调用该条件变量去唤醒被阻塞的、锁兼容的请求。当然如果是 X 类型的锁，就不用唤醒其他的请求了，因为没有跟它兼容的锁。
 
 8. 行加锁的工作流程：与表加锁几乎一样，只是要在加行锁前先检查该事务是否已经获取了相应的表锁，如果没有获取相应的表锁，则抛出异常。此外，应注意最开始的检查与表加锁还略有差别，比如在行上不能加 IS、IX、SIX 锁，等等情况。
 
-9. 解锁需要考虑的点：
+9.  解锁需要考虑的点：
 
     ```cpp
     /**
@@ -198,7 +198,7 @@
     *  在解锁表时，要检查该事务是否还持有该表行的锁
     *
     *    Finally, unlocking a resource should also grant any new lock requests for the resource (if possible).
-    *  解锁后，要通过请求队列中的条件变量唤醒等待被授权的请求
+    *  解锁后，要通过请求队列中的条件变量唤醒其他正在等待被授权的请求
     *
     * TRANSACTION STATE UPDATE
     *    Unlock should update the transaction state appropriately (depending upon the ISOLATION LEVEL)

@@ -54,7 +54,7 @@
    2. 在类中记录一个 count，表示已经输出了多少个 tuple 即可。
 3. Top-N Optimization Rule
    1. 对于这类查询：`EXPLAIN SELECT * FROM __mock_table_1 ORDER BY colA LIMIT 10;`默认情况下会排序整个表，然后取出前10 个 tuple。一种更有效的方法是我们不排序整个表，而是只关注最小的 10 个 tuple 就行。也就是说我们维护一个容器，里面装的是当前最小的 10 个 tuple，当从 child executor 得到一个新的 tuple 时，我们就尝试更新这容器里面的 10 个 tuple，使其始终保存的是 10 个最小的 tuple；
-   2. 首先我们应该实现这个函数 `auto Optimizer::OptimizeSortLimitAsTopN(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef`。注意 AbstractPlanNode 表示 plan 树的抽象节点类型（plan 是一棵树形结构，其中节点是 AbstractPlanNode，且每个节点可能包含多个子节点），每个具体的 plan 树节点都继承于它，比如 LimitPlanNode 和 SortPlanNode 等。现在我们给定这棵树的根节点，我们要找出其中符合 LimitPlanNode + SortPlanNode 的结构，把它换成 TopNPlanNode。其实就是 dfs 遍历。举个例子：下面的 planner 就是一棵树形结构，根节点是 Projection，其子孩子是 NestedLoopJoin，而 NestedLoopJoin 的两个子孩子分别是 SeqScan { table=t1 } 和 SeqScan { table=t2 }。这里优化器所做的工作就是扫描这棵树，找到符合特定 pattern，然后替换成指定的优化后的结构。
+   2. 首先我们应该实现这个函数 `auto Optimizer::OptimizeSortLimitAsTopN(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef`。注意 AbstractPlanNode 表示 plan 树的抽象节点类型（plan 是一棵树形结构，其中节点是 AbstractPlanNode，且每个节点可能包含多个子节点），每个具体的 plan 树节点都继承于它，比如 LimitPlanNode 和 SortPlanNode 等。现在我们给定这棵树的根节点，我们要找出其中符合 LimitPlanNode + SortPlanNode 的结构，把它换成 TopNPlanNode。其实就是 dfs 遍历。
    3. 可以采用优先队列来寻找最小的 10 个 tuple。
 
       ![plan_node](img/lab3/plan_node.jpg)
